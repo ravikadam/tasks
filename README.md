@@ -6,12 +6,58 @@ A modular, service-oriented agentic system that captures tasks from natural lang
 
 This system follows a **service-oriented design** with clear separation of concerns:
 
+```mermaid
+graph TB
+    User[👤 User] --> CLI[🖥️ CLI Service<br/>cli.rs]
+    CLI --> Agent[🤖 Agent Service<br/>agent.rs]
+    CLI --> TaskList[📋 TaskList Service<br/>task_list.rs]
+    
+    Agent --> OpenAI[🧠 OpenAI API<br/>GPT-3.5-turbo]
+    Agent --> Fallback[🔄 Fallback Extraction<br/>Keyword-based]
+    
+    TaskList --> Task[📝 Task Service<br/>task.rs]
+    TaskList --> JSON[💾 JSON Storage<br/>tasks.json]
+    
+    Main[⚙️ Main<br/>main.rs] --> Config[🔧 Configuration<br/>.env file]
+    Main --> CLI
+    Main --> Agent
+    Main --> TaskList
+    
+    subgraph "Core Services"
+        Task
+        TaskList
+        Agent
+        CLI
+    end
+    
+    subgraph "External Dependencies"
+        OpenAI
+        JSON
+        Config
+    end
+    
+    classDef service fill:#e1f5fe,stroke:#01579b,stroke-width:2px
+    classDef external fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
+    classDef user fill:#e8f5e8,stroke:#1b5e20,stroke-width:2px
+    
+    class Task,TaskList,Agent,CLI,Main service
+    class OpenAI,JSON,Config,Fallback external
+    class User user
+```
+
 ### **Core Services**
 - **Task Service** (`src/task.rs`) - Individual task management and validation
 - **TaskList Service** (`src/task_list.rs`) - Collection management and persistence  
 - **Agent Service** (`src/agent.rs`) - LLM-based task extraction
 - **CLI Service** (`src/cli.rs`) - User interaction and command processing
 - **Main** (`src/main.rs`) - Application orchestration and configuration
+
+### **Data Flow**
+1. **User Input** → CLI Service receives natural language input
+2. **Task Extraction** → Agent Service processes input via OpenAI API or fallback
+3. **Task Creation** → Task Service validates and creates task objects
+4. **Storage** → TaskList Service manages collection and persists to JSON
+5. **User Feedback** → CLI Service displays results and statistics
 
 ### **Key Benefits**
 - ✅ **Modular** - Each service has a single responsibility
