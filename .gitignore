@@ -1,0 +1,17 @@
+/target
+
+# Environment variables
+.env
+
+# Task data
+tasks.json
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
