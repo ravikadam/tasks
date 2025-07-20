@@ -1,80 +1,175 @@
-# Agentic Task Capture System (Rust) - Refactored
+# Agentic Task Capture System (Rust) - Microservices Architecture
 
-A modular, service-oriented agentic system that captures tasks from natural language input using LLM-based extraction and manages them with a clean, maintainable architecture.
+A distributed, microservices-based agentic system that captures tasks from natural language input using LLM-based extraction. Built with Docker, PostgreSQL, and service-to-service HTTP communication for scalability and maintainability.
 
-## 🏗️ Architecture
+## 🏗️ Microservices Architecture
 
-This system follows a **service-oriented design** with clear separation of concerns:
+This system follows a **microservices architecture** with 5 independent services communicating via HTTP APIs:
 
 ```mermaid
 graph TB
-    User[👤 User] --> CLI[🖥️ CLI Service<br/>cli.rs]
-    CLI --> Agent[🤖 Agent Service<br/>agent.rs]
-    CLI --> TaskList[📋 TaskList Service<br/>task_list.rs]
+    User[👤 User/Bot/Email] --> Channel[🚪 Channel Service<br/>Port 8001<br/>Entry Point]
     
-    Agent --> OpenAI[🧠 OpenAI API<br/>GPT-3.5-turbo]
-    Agent --> Fallback[🔄 Fallback Extraction<br/>Keyword-based]
+    Channel --> Case[📋 Case Management<br/>Port 8002<br/>Workflow & History]
+    Channel --> AI[🤖 AI Agent Service<br/>Port 8004<br/>LLM Processing]
     
-    TaskList --> Task[📝 Task Service<br/>task.rs]
-    TaskList --> JSON[💾 JSON Storage<br/>tasks.json]
+    Case --> Task[📝 Task Management<br/>Port 8003<br/>CRUD Operations]
+    Case --> Persist[💾 Persistence Service<br/>Port 8005<br/>Database Layer]
     
-    Main[⚙️ Main<br/>main.rs] --> Config[🔧 Configuration<br/>.env file]
-    Main --> CLI
-    Main --> Agent
-    Main --> TaskList
+    Task --> Persist
+    AI --> Case
+    AI --> Task
+    AI --> OpenAI[🧠 OpenAI API<br/>GPT-3.5-turbo]
     
-    subgraph "Core Services"
+    Persist --> DB[(🗄️ PostgreSQL<br/>Port 5432<br/>Database)]
+    
+    subgraph "🐳 Docker Containers"
+        Channel
+        Case
         Task
-        TaskList
-        Agent
-        CLI
+        AI
+        Persist
+        DB
     end
     
-    subgraph "External Dependencies"
+    subgraph "🌐 External APIs"
         OpenAI
-        JSON
-        Config
     end
     
     classDef service fill:#e1f5fe,stroke:#01579b,stroke-width:2px
-    classDef external fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
+    classDef database fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
+    classDef external fill:#fff3e0,stroke:#e65100,stroke-width:2px
     classDef user fill:#e8f5e8,stroke:#1b5e20,stroke-width:2px
     
-    class Task,TaskList,Agent,CLI,Main service
-    class OpenAI,JSON,Config,Fallback external
+    class Channel,Case,Task,AI,Persist service
+    class DB database
+    class OpenAI external
     class User user
 ```
 
-### **Core Services**
-- **Task Service** (`src/task.rs`) - Individual task management and validation
-- **TaskList Service** (`src/task_list.rs`) - Collection management and persistence  
-- **Agent Service** (`src/agent.rs`) - LLM-based task extraction
-- **CLI Service** (`src/cli.rs`) - User interaction and command processing
-- **Main** (`src/main.rs`) - Application orchestration and configuration
+## 🔧 Services Overview
 
-### **Data Flow**
-1. **User Input** → CLI Service receives natural language input
-2. **Task Extraction** → Agent Service processes input via OpenAI API or fallback
-3. **Task Creation** → Task Service validates and creates task objects
-4. **Storage** → TaskList Service manages collection and persists to JSON
-5. **User Feedback** → CLI Service displays results and statistics
+### **1. Channel Service** (Port 8001)
+- **Purpose**: Entry point for all user interactions
+- **Endpoints**: `/bot`, `/email`, `/health`
+- **Responsibilities**: 
+  - Receive input from bots, email, or direct API calls
+  - Route requests to appropriate services
+  - Handle authentication and rate limiting
 
-### **Key Benefits**
-- ✅ **Modular** - Each service has a single responsibility
-- ✅ **Testable** - Independent unit tests for each component
-- ✅ **Maintainable** - Clear interfaces and error handling
-- ✅ **Extensible** - Easy to add new features or swap implementations
-- ✅ **Type-Safe** - Rust's type system prevents many runtime errors
+### **2. Case Management Service** (Port 8002)
+- **Purpose**: Manages case lifecycle and conversation history
+- **Endpoints**: `/cases`, `/cases/{id}`, `/cases/{id}/conversations`, `/health`
+- **Responsibilities**:
+  - Create and manage cases (conversation sessions)
+  - Track conversation history and context
+  - Manage case workflow and state transitions
 
-## Features
+### **3. Task Management Service** (Port 8003)
+- **Purpose**: CRUD operations for individual tasks
+- **Endpoints**: `/tasks`, `/tasks/{id}`, `/tasks/search`, `/health`
+- **Responsibilities**:
+  - Create, read, update, delete tasks
+  - Task validation and business logic
+  - Task search and filtering
 
-- **Natural Language Processing**: Uses OpenAI's GPT-3.5-turbo to intelligently extract tasks and attributes from user input
-- **Flexible Task Structure**: Supports different task types with custom attributes using `HashMap<String, Value>`
-- **JSON Persistence**: Automatic saving and loading of tasks from JSON file
-- **Fallback Extraction**: Intelligent keyword-based extraction when no API key available
-- **Interactive CLI**: Rich command-line interface with help, statistics, and filtering
-- **Environment Configuration**: `.env` file support for easy configuration management
-- **Comprehensive Error Handling**: Proper error types and handling throughout the system
+### **4. AI Agent Service** (Port 8004)
+- **Purpose**: LLM integration and task extraction
+- **Endpoints**: `/extract`, `/process`, `/health`
+- **Responsibilities**:
+  - Process natural language input via OpenAI API
+  - Extract structured task data from unstructured text
+  - Provide fallback keyword-based extraction
+  - Orchestrate multi-service workflows
+
+### **5. Persistence Service** (Port 8005)
+- **Purpose**: Database abstraction layer
+- **Endpoints**: `/cases`, `/tasks`, `/conversations`, `/health`
+- **Responsibilities**:
+  - PostgreSQL database operations
+  - Data validation and integrity
+  - Query optimization and caching
+  - Database migrations and schema management
+
+## 🔄 Service Communication Flow
+
+1. **User Input** → Channel Service receives request
+2. **Case Creation** → Channel Service calls Case Management to create/retrieve case
+3. **AI Processing** → Channel Service calls AI Agent Service for task extraction
+4. **Task Creation** → AI Agent calls Task Management to create tasks
+5. **Data Persistence** → All services use Persistence Service for database operations
+6. **Response** → Channel Service returns structured response to user
+
+## ✨ Architecture Benefits
+
+- 🔄 **Scalable** - Each service can be scaled independently
+- 🛡️ **Resilient** - Service failures don't bring down the entire system
+- 🧪 **Testable** - Each service can be tested in isolation
+- 🔧 **Maintainable** - Clear service boundaries and responsibilities
+- 🚀 **Deployable** - Independent deployment and versioning
+- 📊 **Observable** - Each service has health checks and logging
+- 🔒 **Secure** - Service-to-service authentication and authorization
+
+## 🚀 Quick Start with Docker
+
+### Prerequisites
+- Docker Desktop installed and running
+- Git (to clone the repository)
+
+### 1. Clone and Setup
+```bash
+# Clone the repository
+git clone <your-repo-url>
+cd tasks
+
+# Copy environment template
+cp .env.example .env
+
+# Edit .env and add your OpenAI API key (optional)
+# OPENAI_API_KEY=sk-your-actual-key-here
+```
+
+### 2. Start All Services
+```bash
+# Build and start all microservices
+docker-compose up -d
+
+# Check service status
+docker ps
+
+# View logs
+docker-compose logs -f
+```
+
+### 3. Verify Services
+```bash
+# Check health endpoints
+curl http://localhost:8001/health  # Channel Service
+curl http://localhost:8002/health  # Case Management
+curl http://localhost:8003/health  # Task Management
+curl http://localhost:8004/health  # AI Agent Service
+curl http://localhost:8005/health  # Persistence Service
+```
+
+### 4. Test the System
+```bash
+# Create a task via Channel Service
+curl -X POST http://localhost:8001/bot \
+  -H "Content-Type: application/json" \
+  -d '{"message": "I need to call John tomorrow and buy groceries"}'
+```
+
+## 🌟 Features
+
+- **🤖 Natural Language Processing**: Uses OpenAI GPT-3.5-turbo for intelligent task extraction
+- **🏗️ Microservices Architecture**: 5 independent, scalable services
+- **🐳 Docker Containerization**: Easy deployment and development
+- **🗄️ PostgreSQL Database**: Robust data persistence and querying
+- **🔄 Service Communication**: HTTP-based inter-service communication
+- **🛡️ Health Monitoring**: Built-in health checks for all services
+- **📊 Structured Logging**: Comprehensive logging across all services
+- **🔧 Environment Configuration**: Flexible configuration management
+- **🧪 Fallback Processing**: Keyword-based extraction when OpenAI unavailable
 
 ## Task Types Supported
 
@@ -91,31 +186,51 @@ graph TB
 - **Finance**: amount, category, due_date
 - **Learning**: subject, duration, resources
 
-## Installation
+## 🐳 Docker Deployment
 
-### 1. Install Rust
+### Service Ports
+- **Channel Service**: `localhost:8001`
+- **Case Management**: `localhost:8002`
+- **Task Management**: `localhost:8003`
+- **AI Agent Service**: `localhost:8004`
+- **Persistence Service**: `localhost:8005`
+- **PostgreSQL Database**: `localhost:5432`
 
-If you don't have Rust installed, install it using rustup:
-
+### Docker Commands
 ```bash
-# Install Rust (follow the prompts)
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+# Start all services
+docker-compose up -d
 
-# Reload your shell environment
-source $HOME/.cargo/env
+# Stop all services
+docker-compose down
 
-# Verify installation
-rustc --version
-cargo --version
+# Rebuild and restart
+docker-compose up -d --build
+
+# View logs for specific service
+docker-compose logs -f channel-service
+docker-compose logs -f case-management-service
+docker-compose logs -f task-management-service
+docker-compose logs -f ai-agent-service
+docker-compose logs -f persistence-service
+
+# Scale a specific service
+docker-compose up -d --scale task-management-service=3
 ```
 
-### 2. Setup the Project
+### Development Setup
 
-1. Clone or download this project
+1. **Prerequisites**:
+   - Docker Desktop
+   - Git
+   - (Optional) Rust toolchain for local development
 
-2. Navigate to the project directory:
+2. **Clone and Setup**:
    ```bash
+   git clone <repository-url>
    cd tasks
+   cp .env.example .env
+   # Edit .env with your configuration
    ```
 
 3. Copy the environment template and configure your API key:
@@ -239,30 +354,70 @@ Tasks are automatically saved to `tasks.json` in the current directory. The file
 ## 📁 Project Structure
 
 ```
-src/
-├── main.rs          # Application orchestration and configuration
-├── task.rs          # Task data structure, validation, and operations
-├── task_list.rs     # Task collection management and persistence
-├── agent.rs         # LLM-based task extraction and fallback logic
-└── cli.rs           # Interactive command-line interface
+.
+├── Cargo.toml                    # Workspace configuration
+├── docker-compose.yml            # Multi-service Docker configuration
+├── README.md                     # This documentation
+├── .env.example                  # Environment template
+├── migrations/                   # Database schema migrations
+│   └── *.sql
+├── shared/                       # Shared libraries
+│   ├── models/                   # Common data structures
+│   └── common/                   # Utility functions
+└── services/                     # Microservices
+    ├── channel-service/          # Entry point service
+    │   ├── src/main.rs
+    │   ├── Cargo.toml
+    │   └── Dockerfile
+    ├── case-management-service/  # Case lifecycle management
+    │   ├── src/main.rs
+    │   ├── Cargo.toml
+    │   └── Dockerfile
+    ├── task-management-service/  # Task CRUD operations
+    │   ├── src/main.rs
+    │   ├── Cargo.toml
+    │   └── Dockerfile
+    ├── ai-agent-service/         # LLM integration
+    │   ├── src/main.rs
+    │   ├── Cargo.toml
+    │   └── Dockerfile
+    └── persistence-service/      # Database layer
+        ├── src/main.rs
+        ├── Cargo.toml
+        └── Dockerfile
 ```
 
 ## 🧪 Testing
 
-Each module includes comprehensive unit tests:
-
+### Service-Level Testing
 ```bash
-# Run all tests
-cargo test
+# Test individual services locally (requires Rust toolchain)
+cd services/channel-service && cargo test
+cd services/case-management-service && cargo test
+cd services/task-management-service && cargo test
+cd services/ai-agent-service && cargo test
+cd services/persistence-service && cargo test
 
-# Run tests for specific modules
-cargo test task::
-cargo test task_list::
-cargo test agent::
-cargo test cli::
+# Test shared libraries
+cd shared/models && cargo test
+cd shared/common && cargo test
+```
 
-# Run tests with output
-cargo test -- --nocapture
+### Integration Testing
+```bash
+# Start services for integration testing
+docker-compose up -d
+
+# Run integration tests (example)
+curl -X POST http://localhost:8001/bot \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Test task creation"}'
+
+# Check health endpoints
+for port in 8001 8002 8003 8004 8005; do
+  echo "Testing port $port:"
+  curl -s http://localhost:$port/health || echo "Service on port $port not responding"
+done
 ```
 
 ## ⚙️ Configuration

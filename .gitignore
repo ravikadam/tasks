@@ -15,3 +15,15 @@ tasks.json
 # OS files
 .DS_Store
 Thumbs.db
+
+# Microservices specific
+target/
+.env
+*.log
+
+# Database
+*.db
+*.sqlite
+
+# Docker
+.dockerignore
