@@ -51,11 +51,11 @@ graph TB
 
 ### **1. Channel Service** (Port 8001)
 - **Purpose**: Entry point for all user interactions
-- **Endpoints**: `/bot`, `/email`, `/health`
+- **Endpoints**: `/api/v1/message`, `/health`
 - **Responsibilities**: 
-  - Receive input from bots, email, or direct API calls
-  - Route requests to appropriate services
-  - Handle authentication and rate limiting
+  - Receive input from various channels (Bot, Email, WebChat, API)
+  - Route requests to AI Agent and Case Management services
+  - Handle message validation and formatting
 
 ### **2. Case Management Service** (Port 8002)
 - **Purpose**: Manages case lifecycle and conversation history
@@ -153,10 +153,79 @@ curl http://localhost:8005/health  # Persistence Service
 
 ### 4. Test the System
 ```bash
-# Create a task via Channel Service
-curl -X POST http://localhost:8001/bot \
+# Create tasks via Channel Service API
+curl -X POST http://localhost:8001/api/v1/message \
   -H "Content-Type: application/json" \
-  -d '{"message": "I need to call John tomorrow and buy groceries"}'
+  -d '{"message": "I need to call John tomorrow and buy groceries", "sender_id": "user123", "channel": "API"}'
+
+# Example successful response:
+{
+  "case_id": "15693dce-e42f-42d2-863f-fd02cd1719a4",
+  "response": "I see you need to call John tomorrow and buy groceries. Would you like assistance with anything else?",
+  "actions_taken": [
+    "Created new case",
+    "Added conversation entry", 
+    "Created task: Call John Tomorrow",
+    "Created task: Buy Groceries"
+  ],
+  "tasks_created": [
+    "3b02d548-1839-4ffd-afcd-591feef31a2f",
+    "aa313aea-2bf1-42e0-9018-6ae2bf2d6a5e"
+  ],
+  "tasks_updated": []
+}
+```
+
+## 📡 API Documentation
+
+### Message API Endpoint
+
+**POST** `/api/v1/message`
+
+#### Request Format
+```json
+{
+  "message": "string (required)",     // The natural language message
+  "sender_id": "string (required)",   // Unique identifier for the sender
+  "channel": "enum (required)",       // One of: "Bot", "Email", "WebChat", "API"
+  "case_id": "uuid (optional)"        // Associate with existing case
+}
+```
+
+#### Response Format
+```json
+{
+  "case_id": "uuid",                  // Case ID (new or existing)
+  "response": "string",               // AI-generated response
+  "actions_taken": ["string"],        // List of actions performed
+  "tasks_created": ["uuid"],          // UUIDs of newly created tasks
+  "tasks_updated": ["uuid"]           // UUIDs of updated tasks
+}
+```
+
+#### Channel Types
+- **Bot**: Messages from chatbots or automated systems
+- **Email**: Messages received via email
+- **WebChat**: Messages from web chat interfaces
+- **API**: Direct API calls
+
+#### Error Responses
+```json
+// 422 Unprocessable Entity (missing required fields)
+{
+  "error": {
+    "code": 422,
+    "message": "Validation error: missing required field 'sender_id'"
+  }
+}
+
+// 502 Bad Gateway (service unavailable)
+{
+  "error": {
+    "code": 502,
+    "message": "External service error"
+  }
+}
 ```
 
 ## 🌟 Features
@@ -330,15 +399,84 @@ Saved 2 tasks to tasks.json
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 
-## Data Storage
+## 🗄️ PostgreSQL Data Persistence
 
-Tasks are automatically saved to `tasks.json` in the current directory. The file contains:
+### Database Schema
 
-- Task ID (UUID)
-- Title and description
-- Task type and status
-- Creation timestamp
-- Custom attributes based on task type
+The system uses **PostgreSQL** for permanent data storage with the following tables:
+
+#### **Cases Table**
+```sql
+CREATE TABLE cases (
+    id UUID PRIMARY KEY,
+    title VARCHAR NOT NULL,
+    description TEXT,
+    status VARCHAR NOT NULL,           -- "Open", "InProgress", "Closed"
+    priority VARCHAR NOT NULL,         -- "Low", "Medium", "High", "Critical"
+    created_at TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL,
+    assigned_to VARCHAR,
+    metadata JSONB NOT NULL DEFAULT '{}'
+);
+```
+
+#### **Tasks Table**
+```sql
+CREATE TABLE tasks (
+    id UUID PRIMARY KEY,
+    case_id UUID NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+    title VARCHAR NOT NULL,
+    description TEXT,
+    task_type VARCHAR NOT NULL,        -- "Work", "Meeting", "Shopping", etc.
+    status VARCHAR NOT NULL,           -- "Pending", "InProgress", "Completed"
+    priority VARCHAR NOT NULL,         -- "Low", "Medium", "High", "Critical"
+    due_date TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL,
+    completed_at TIMESTAMPTZ,
+    metadata JSONB NOT NULL DEFAULT '{}'
+);
+```
+
+#### **Conversation Entries Table**
+```sql
+CREATE TABLE conversation_entries (
+    id UUID PRIMARY KEY,
+    case_id UUID NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+    message TEXT NOT NULL,
+    sender VARCHAR NOT NULL,           -- "User", "Agent"
+    timestamp TIMESTAMPTZ NOT NULL,
+    metadata JSONB NOT NULL DEFAULT '{}'
+);
+```
+
+### Database Connection
+
+- **Host**: `localhost:5432` (via Docker)
+- **Database**: `task_agent`
+- **Username**: `postgres`
+- **Password**: `postgres`
+- **Connection String**: `postgresql://postgres:postgres@postgres:5432/task_agent`
+
+### Automatic Migrations
+
+Database tables are created automatically when the persistence service starts. No manual migration is required.
+
+### Verifying Data Persistence
+
+```bash
+# Connect to PostgreSQL container
+docker exec -it tasks-postgres-1 psql -U postgres -d task_agent
+
+# Check cases
+SELECT id, title, status, priority FROM cases;
+
+# Check tasks
+SELECT id, case_id, title, task_type, status FROM tasks;
+
+# Check conversation history
+SELECT id, case_id, message, sender FROM conversation_entries;
+```
 
 ## Dependencies
 

@@ -1,12 +1,11 @@
-use sqlx::{PgPool, Row};
+use sqlx::PgPool;
 use models::{
     Case, Task, ConversationEntry, CaseWorkflow, WorkflowStep,
-    UpdateCaseRequest, UpdateTaskRequest,
-    CaseStatus, TaskStatus, Priority, TaskType, MessageSender, StepStatus
+    UpdateCaseRequest, UpdateTaskRequest, StepStatus
 };
 use common::{ServiceResult, ServiceError};
 use uuid::Uuid;
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 
 #[derive(Clone)]
 pub struct Database {
@@ -14,48 +13,38 @@ pub struct Database {
 }
 
 impl Database {
-    pub async fn new(database_url: &str) -> Result<Self, sqlx::Error> {
+    pub async fn new(database_url: &str) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let pool = PgPool::connect(database_url).await?;
         Ok(Self { pool })
     }
 
-    pub async fn migrate(&self) -> Result<(), sqlx::Error> {
+    pub async fn migrate(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         sqlx::migrate!("./migrations").run(&self.pool).await?;
         Ok(())
     }
 
     // Case operations
     pub async fn create_case(&self, case: Case) -> ServiceResult<Case> {
-        let row = sqlx::query!(
+        let _row = sqlx::query!(
             r#"
             INSERT INTO cases (id, title, description, status, priority, created_at, updated_at, assigned_to, metadata)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-            RETURNING id, title, description, status, priority, created_at, updated_at, assigned_to, metadata
             "#,
             case.id,
             case.title,
             case.description,
-            serde_json::to_string(&case.status)?,
-            serde_json::to_string(&case.priority)?,
+            serde_json::to_string(&case.status).unwrap(),
+            serde_json::to_string(&case.priority).unwrap(),
             case.created_at,
             case.updated_at,
             case.assigned_to,
             case.metadata
         )
-        .fetch_one(&self.pool)
-        .await?;
+        .execute(&self.pool)
+        .await
+        .map_err(|e| ServiceError::Internal(anyhow::anyhow!("Database error: {}", e)))?;
 
-        Ok(Case {
-            id: row.id,
-            title: row.title,
-            description: row.description,
-            status: serde_json::from_str(&row.status)?,
-            priority: serde_json::from_str(&row.priority)?,
-            created_at: row.created_at,
-            updated_at: row.updated_at,
-            assigned_to: row.assigned_to,
-            metadata: row.metadata,
-        })
+        Ok(case)
     }
 
     pub async fn get_case(&self, id: Uuid) -> ServiceResult<Case> {
@@ -64,15 +53,16 @@ impl Database {
             id
         )
         .fetch_optional(&self.pool)
-        .await?
+        .await
+        .map_err(|e| ServiceError::Internal(anyhow::anyhow!("Database error: {}", e)))?
         .ok_or_else(|| ServiceError::NotFound(format!("Case with id {} not found", id)))?;
 
         Ok(Case {
             id: row.id,
             title: row.title,
             description: row.description,
-            status: serde_json::from_str(&row.status)?,
-            priority: serde_json::from_str(&row.priority)?,
+            status: serde_json::from_str(&row.status).unwrap(),
+            priority: serde_json::from_str(&row.priority).unwrap(),
             created_at: row.created_at,
             updated_at: row.updated_at,
             assigned_to: row.assigned_to,
@@ -81,9 +71,10 @@ impl Database {
     }
 
     pub async fn update_case(&self, id: Uuid, request: UpdateCaseRequest) -> ServiceResult<Case> {
-        // For simplicity, let's just get the current case and update it
+        // Get current case first
         let mut case = self.get_case(id).await?;
         
+        // Update fields
         if let Some(title) = request.title {
             case.title = title;
         }
@@ -101,75 +92,53 @@ impl Database {
         }
         case.updated_at = Utc::now();
 
-        let row = sqlx::query!(
+        // Update in database
+        sqlx::query!(
             r#"
             UPDATE cases 
             SET title = $2, description = $3, status = $4, priority = $5, updated_at = $6, assigned_to = $7
             WHERE id = $1
-            RETURNING id, title, description, status, priority, created_at, updated_at, assigned_to, metadata
             "#,
             id,
             case.title,
             case.description,
-            serde_json::to_string(&case.status)?,
-            serde_json::to_string(&case.priority)?,
+            serde_json::to_string(&case.status).unwrap(),
+            serde_json::to_string(&case.priority).unwrap(),
             case.updated_at,
             case.assigned_to
         )
-        .fetch_one(&self.pool)
-        .await?;
+        .execute(&self.pool)
+        .await
+        .map_err(|e| ServiceError::Internal(anyhow::anyhow!("Database error: {}", e)))?;
 
-        Ok(Case {
-            id: row.id,
-            title: row.title,
-            description: row.description,
-            status: serde_json::from_str(&row.status)?,
-            priority: serde_json::from_str(&row.priority)?,
-            created_at: row.created_at,
-            updated_at: row.updated_at,
-            assigned_to: row.assigned_to,
-            metadata: row.metadata,
-        })
+        Ok(case)
     }
 
     // Task operations
     pub async fn create_task(&self, task: Task) -> ServiceResult<Task> {
-        let row = sqlx::query!(
+        sqlx::query!(
             r#"
             INSERT INTO tasks (id, case_id, title, description, task_type, status, priority, due_date, created_at, updated_at, completed_at, metadata)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-            RETURNING id, case_id, title, description, task_type, status, priority, due_date, created_at, updated_at, completed_at, metadata
             "#,
             task.id,
             task.case_id,
             task.title,
             task.description,
-            serde_json::to_string(&task.task_type)?,
-            serde_json::to_string(&task.status)?,
-            serde_json::to_string(&task.priority)?,
+            serde_json::to_string(&task.task_type).unwrap(),
+            serde_json::to_string(&task.status).unwrap(),
+            serde_json::to_string(&task.priority).unwrap(),
             task.due_date,
             task.created_at,
             task.updated_at,
             task.completed_at,
             task.metadata
         )
-        .fetch_one(&self.pool)
-        .await?;
+        .execute(&self.pool)
+        .await
+        .map_err(|e| ServiceError::Internal(anyhow::anyhow!("Database error: {}", e)))?;
 
-        Ok(Task {
-            id: row.id,
-            case_id: row.case_id,
-            title: row.title,
-            description: row.description,
-            task_type: serde_json::from_str(&row.task_type)?,
-            status: serde_json::from_str(&row.status)?,
-            priority: serde_json::from_str(&row.priority)?,
-            due_date: row.due_date,
-            created_at: row.created_at,
-            updated_at: row.updated_at,
-            completed_at: row.completed_at,
-            metadata: row.metadata,
-        })
+        Ok(task)
     }
 
     pub async fn get_task(&self, id: Uuid) -> ServiceResult<Task> {
@@ -178,7 +147,8 @@ impl Database {
             id
         )
         .fetch_optional(&self.pool)
-        .await?
+        .await
+        .map_err(|e| ServiceError::Internal(anyhow::anyhow!("Database error: {}", e)))?
         .ok_or_else(|| ServiceError::NotFound(format!("Task with id {} not found", id)))?;
 
         Ok(Task {
@@ -186,9 +156,9 @@ impl Database {
             case_id: row.case_id,
             title: row.title,
             description: row.description,
-            task_type: serde_json::from_str(&row.task_type)?,
-            status: serde_json::from_str(&row.status)?,
-            priority: serde_json::from_str(&row.priority)?,
+            task_type: serde_json::from_str(&row.task_type).unwrap(),
+            status: serde_json::from_str(&row.status).unwrap(),
+            priority: serde_json::from_str(&row.priority).unwrap(),
             due_date: row.due_date,
             created_at: row.created_at,
             updated_at: row.updated_at,
@@ -208,7 +178,7 @@ impl Database {
         }
         if let Some(status) = request.status {
             task.status = status;
-            if matches!(task.status, TaskStatus::Completed) {
+            if matches!(task.status, models::TaskStatus::Completed) {
                 task.completed_at = Some(Utc::now());
             }
         }
@@ -220,39 +190,26 @@ impl Database {
         }
         task.updated_at = Utc::now();
 
-        let row = sqlx::query!(
+        sqlx::query!(
             r#"
             UPDATE tasks 
             SET title = $2, description = $3, status = $4, priority = $5, due_date = $6, updated_at = $7, completed_at = $8
             WHERE id = $1
-            RETURNING id, case_id, title, description, task_type, status, priority, due_date, created_at, updated_at, completed_at, metadata
             "#,
             id,
             task.title,
             task.description,
-            serde_json::to_string(&task.status)?,
-            serde_json::to_string(&task.priority)?,
+            serde_json::to_string(&task.status).unwrap(),
+            serde_json::to_string(&task.priority).unwrap(),
             task.due_date,
             task.updated_at,
             task.completed_at
         )
-        .fetch_one(&self.pool)
-        .await?;
+        .execute(&self.pool)
+        .await
+        .map_err(|e| ServiceError::Internal(anyhow::anyhow!("Database error: {}", e)))?;
 
-        Ok(Task {
-            id: row.id,
-            case_id: row.case_id,
-            title: row.title,
-            description: row.description,
-            task_type: serde_json::from_str(&row.task_type)?,
-            status: serde_json::from_str(&row.status)?,
-            priority: serde_json::from_str(&row.priority)?,
-            due_date: row.due_date,
-            created_at: row.created_at,
-            updated_at: row.updated_at,
-            completed_at: row.completed_at,
-            metadata: row.metadata,
-        })
+        Ok(task)
     }
 
     pub async fn delete_task(&self, id: Uuid) -> ServiceResult<()> {
@@ -261,7 +218,8 @@ impl Database {
             id
         )
         .execute(&self.pool)
-        .await?;
+        .await
+        .map_err(|e| ServiceError::Internal(anyhow::anyhow!("Database error: {}", e)))?;
 
         if result.rows_affected() == 0 {
             return Err(ServiceError::NotFound(format!("Task with id {} not found", id)));
@@ -276,7 +234,8 @@ impl Database {
             case_id
         )
         .fetch_all(&self.pool)
-        .await?;
+        .await
+        .map_err(|e| ServiceError::Internal(anyhow::anyhow!("Database error: {}", e)))?;
 
         let mut tasks = Vec::new();
         for row in rows {
@@ -285,9 +244,9 @@ impl Database {
                 case_id: row.case_id,
                 title: row.title,
                 description: row.description,
-                task_type: serde_json::from_str(&row.task_type)?,
-                status: serde_json::from_str(&row.status)?,
-                priority: serde_json::from_str(&row.priority)?,
+                task_type: serde_json::from_str(&row.task_type).unwrap(),
+                status: serde_json::from_str(&row.status).unwrap(),
+                priority: serde_json::from_str(&row.priority).unwrap(),
                 due_date: row.due_date,
                 created_at: row.created_at,
                 updated_at: row.updated_at,
@@ -306,7 +265,8 @@ impl Database {
             case_id
         )
         .fetch_all(&self.pool)
-        .await?;
+        .await
+        .map_err(|e| ServiceError::Internal(anyhow::anyhow!("Database error: {}", e)))?;
 
         let mut entries = Vec::new();
         for row in rows {
@@ -314,7 +274,7 @@ impl Database {
                 id: row.id,
                 case_id: row.case_id,
                 message: row.message,
-                sender: serde_json::from_str(&row.sender)?,
+                sender: serde_json::from_str(&row.sender).unwrap(),
                 timestamp: row.timestamp,
                 metadata: row.metadata,
             });
@@ -324,30 +284,23 @@ impl Database {
     }
 
     pub async fn add_conversation_entry(&self, entry: ConversationEntry) -> ServiceResult<ConversationEntry> {
-        let row = sqlx::query!(
+        sqlx::query!(
             r#"
             INSERT INTO conversation_entries (id, case_id, message, sender, timestamp, metadata)
             VALUES ($1, $2, $3, $4, $5, $6)
-            RETURNING id, case_id, message, sender, timestamp, metadata
             "#,
             entry.id,
             entry.case_id,
             entry.message,
-            serde_json::to_string(&entry.sender)?,
+            serde_json::to_string(&entry.sender).unwrap(),
             entry.timestamp,
             entry.metadata
         )
-        .fetch_one(&self.pool)
-        .await?;
+        .execute(&self.pool)
+        .await
+        .map_err(|e| ServiceError::Internal(anyhow::anyhow!("Database error: {}", e)))?;
 
-        Ok(ConversationEntry {
-            id: row.id,
-            case_id: row.case_id,
-            message: row.message,
-            sender: serde_json::from_str(&row.sender)?,
-            timestamp: row.timestamp,
-            metadata: row.metadata,
-        })
+        Ok(entry)
     }
 
     // Workflow operations (simplified)

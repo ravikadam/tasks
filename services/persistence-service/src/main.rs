@@ -18,8 +18,8 @@ use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use tracing::{info, instrument};
 use uuid::Uuid;
 
-mod database_simple;
-use database_simple::Database;
+mod database_working;
+use database_working::Database;
 
 #[derive(Clone)]
 struct AppState {
@@ -38,9 +38,8 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     // Initialize database
-    let default_db_url = "memory://localhost".to_string();
     let database_url = config.database_url.as_ref()
-        .unwrap_or(&default_db_url);
+        .ok_or_else(|| anyhow::anyhow!("DATABASE_URL environment variable is required"))?;
     
     let db = Database::new(database_url).await
         .map_err(|e| anyhow::anyhow!("Failed to initialize database: {}", e))?;
