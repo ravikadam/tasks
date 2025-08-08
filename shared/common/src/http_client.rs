@@ -25,6 +25,7 @@ impl HttpClient {
             .get(url)
             .send()
             .await?
+            .error_for_status()?
             .json::<T>()
             .await
     }
@@ -39,6 +40,7 @@ impl HttpClient {
             .json(body)
             .send()
             .await?
+            .error_for_status()?
             .json::<U>()
             .await
     }
@@ -53,15 +55,13 @@ impl HttpClient {
             .json(body)
             .send()
             .await?
+            .error_for_status()?
             .json::<U>()
             .await
     }
 
     pub async fn delete(&self, url: &str) -> Result<(), reqwest::Error> {
-        self.client
-            .delete(url)
-            .send()
-            .await?;
+        self.client.delete(url).send().await?.error_for_status()?;
         Ok(())
     }
 }
