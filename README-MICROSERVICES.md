@@ -4,7 +4,7 @@ This is a comprehensive refactor of the original Rust agentic task capture syste
 
 ## Architecture Overview
 
-The system consists of 5 microservices that communicate via HTTP APIs:
+The system consists of 6 microservices that communicate via HTTP APIs:
 
 ### 1. Channel Service (Port 8001)
 - **Purpose**: Entry point for all user interactions
@@ -50,10 +50,19 @@ The system consists of 5 microservices that communicate via HTTP APIs:
 ### 5. Persistence Service (Port 8005)
 - **Purpose**: Database operations with PostgreSQL
 - **Endpoints**: Internal service-to-service communication only
-- **Responsibilities**: 
+- **Responsibilities**:
   - PostgreSQL database operations
   - Data persistence for cases, tasks, conversations, workflows
   - Database migrations and schema management
+
+### 6. Dashboard Service (Port 8006)
+- **Purpose**: Simple web UI for viewing pending tasks
+- **Endpoints**:
+  - `GET /` - Render pending tasks
+  - `GET /health` - Health check
+- **Responsibilities**:
+  - Fetch tasks from Task Management Service
+  - Display pending tasks in a lightweight HTML page
 
 ## Data Models
 
@@ -201,6 +210,7 @@ Each service exposes a `/health` endpoint:
 - http://localhost:8003/health (Task Management)
 - http://localhost:8004/health (AI Agent)
 - http://localhost:8005/health (Persistence)
+- http://localhost:8006/health (Dashboard)
 
 ## Development Notes
 

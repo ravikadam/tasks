@@ -1,7 +1,7 @@
 use sqlx::{PgPool, Row};
 use models::{
     Case, Task, ConversationEntry, CaseWorkflow, WorkflowStep,
-    UpdateCaseRequest, UpdateTaskRequest, StepStatus
+    UpdateCaseRequest, UpdateTaskRequest, StepStatus, TaskStatus
 };
 use common::{ServiceResult, ServiceError};
 use uuid::Uuid;
@@ -293,6 +293,69 @@ impl Database {
                 task_type: serde_json::from_str(&row.get::<String, _>("task_type")).map_err(|e| ServiceError::Internal(anyhow::anyhow!("Deserialization error: {}", e)))?,
                 status: serde_json::from_str(&row.get::<String, _>("status")).map_err(|e| ServiceError::Internal(anyhow::anyhow!("Deserialization error: {}", e)))?,
                 priority: serde_json::from_str(&row.get::<String, _>("priority")).map_err(|e| ServiceError::Internal(anyhow::anyhow!("Deserialization error: {}", e)))?,
+                due_date: row.get("due_date"),
+                created_at: row.get("created_at"),
+                updated_at: row.get("updated_at"),
+                completed_at: row.get("completed_at"),
+                metadata: row.get("metadata"),
+            });
+        }
+
+        Ok(tasks)
+    }
+
+    pub async fn get_all_tasks(&self) -> ServiceResult<Vec<Task>> {
+        let rows = sqlx::query("SELECT * FROM tasks ORDER BY created_at DESC")
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| ServiceError::Internal(anyhow::anyhow!("Database error: {}", e)))?;
+
+        let mut tasks = Vec::new();
+        for row in rows {
+            tasks.push(Task {
+                id: row.get("id"),
+                case_id: row.get("case_id"),
+                title: row.get("title"),
+                description: row.get("description"),
+                task_type: serde_json::from_str(&row.get::<String, _>("task_type"))
+                    .map_err(|e| ServiceError::Internal(anyhow::anyhow!("Deserialization error: {}", e)))?,
+                status: serde_json::from_str(&row.get::<String, _>("status"))
+                    .map_err(|e| ServiceError::Internal(anyhow::anyhow!("Deserialization error: {}", e)))?,
+                priority: serde_json::from_str(&row.get::<String, _>("priority"))
+                    .map_err(|e| ServiceError::Internal(anyhow::anyhow!("Deserialization error: {}", e)))?,
+                due_date: row.get("due_date"),
+                created_at: row.get("created_at"),
+                updated_at: row.get("updated_at"),
+                completed_at: row.get("completed_at"),
+                metadata: row.get("metadata"),
+            });
+        }
+
+        Ok(tasks)
+    }
+
+    pub async fn get_tasks_by_status(&self, status: TaskStatus) -> ServiceResult<Vec<Task>> {
+        let status_str = serde_json::to_string(&status)
+            .map_err(|e| ServiceError::Internal(anyhow::anyhow!("Serialization error: {}", e)))?;
+        let rows = sqlx::query("SELECT * FROM tasks WHERE status = $1 ORDER BY created_at DESC")
+            .bind(status_str)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| ServiceError::Internal(anyhow::anyhow!("Database error: {}", e)))?;
+
+        let mut tasks = Vec::new();
+        for row in rows {
+            tasks.push(Task {
+                id: row.get("id"),
+                case_id: row.get("case_id"),
+                title: row.get("title"),
+                description: row.get("description"),
+                task_type: serde_json::from_str(&row.get::<String, _>("task_type"))
+                    .map_err(|e| ServiceError::Internal(anyhow::anyhow!("Deserialization error: {}", e)))?,
+                status: serde_json::from_str(&row.get::<String, _>("status"))
+                    .map_err(|e| ServiceError::Internal(anyhow::anyhow!("Deserialization error: {}", e)))?,
+                priority: serde_json::from_str(&row.get::<String, _>("priority"))
+                    .map_err(|e| ServiceError::Internal(anyhow::anyhow!("Deserialization error: {}", e)))?,
                 due_date: row.get("due_date"),
                 created_at: row.get("created_at"),
                 updated_at: row.get("updated_at"),

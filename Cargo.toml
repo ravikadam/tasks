@@ -5,6 +5,7 @@ members = [
     "services/task-management-service",
     "services/ai-agent-service",
     "services/persistence-service",
+    "services/dashboard-service",
     "shared/models",
     "shared/common"
 ]

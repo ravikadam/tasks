@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Path, State},
+    extract::{Path, State, Query},
     http::StatusCode,
     response::Json,
     routing::{get, post, put, delete},
@@ -22,6 +22,11 @@ struct AppState {
     http_client: HttpClient,
 }
 
+#[derive(Debug, serde::Deserialize)]
+struct TaskQuery {
+    status: Option<TaskStatus>,
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     dotenv::dotenv().ok();
@@ -41,6 +46,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/health", get(health_check))
         .route("/api/v1/cases/:case_id/tasks", get(get_tasks_for_case))
         .route("/api/v1/cases/:case_id/tasks", post(create_task))
+        .route("/api/v1/tasks", get(get_tasks))
         .route("/api/v1/tasks/:id", get(get_task))
         .route("/api/v1/tasks/:id", put(update_task))
         .route("/api/v1/tasks/:id", delete(delete_task))
@@ -113,6 +119,30 @@ async fn create_task(
 
     info!("Task created with ID: {}", saved_task.id);
     Ok(Json(saved_task))
+}
+
+#[instrument(skip(state))]
+async fn get_tasks(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<TaskQuery>,
+) -> ServiceResult<Json<Vec<Task>>> {
+    info!("Getting tasks with query: {:?}", query.status);
+
+    let base_url = format!("{}/api/v1/tasks", state.config.service_url("persistence"));
+    let url = if let Some(status) = query.status {
+        let status_str = format!("{:?}", status);
+        format!("{}?status={}", base_url, status_str)
+    } else {
+        base_url
+    };
+
+    let tasks = state
+        .http_client
+        .get::<Vec<Task>>(&url)
+        .await
+        .map_err(|e| common::ServiceError::HttpClient(e))?;
+
+    Ok(Json(tasks))
 }
 
 #[instrument(skip(state))]

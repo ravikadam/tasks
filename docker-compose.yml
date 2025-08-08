@@ -80,5 +80,18 @@ services:
     depends_on:
       - postgres
 
+  dashboard-service:
+    build:
+      context: .
+      dockerfile: services/dashboard-service/Dockerfile
+    ports:
+      - "8006:8006"
+    environment:
+      - RUST_LOG=info
+      - PORT=8006
+      - TASK_MANAGEMENT_SERVICE_URL=http://task-management-service:8003
+    depends_on:
+      - task-management-service
+
 volumes:
   postgres_data:
