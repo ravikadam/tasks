@@ -4,7 +4,7 @@ A distributed, microservices-based agentic system that captures tasks from natur
 
 ## 🏗️ Microservices Architecture
 
-This system follows a **microservices architecture** with 5 independent services communicating via HTTP APIs:
+This system follows a **microservices architecture** with 6 independent services communicating via HTTP APIs:
 
 ```mermaid
 graph TB
@@ -91,6 +91,13 @@ graph TB
   - Query optimization and caching
   - Database migrations and schema management
 
+### **6. Dashboard Service** (Port 8006)
+- **Purpose**: Web UI for viewing pending tasks
+- **Endpoints**: `/`, `/health`
+- **Responsibilities**:
+  - Fetch tasks from Task Management Service
+  - Render pending tasks in simple HTML
+
 ## 🔄 Service Communication Flow
 
 1. **User Input** → Channel Service receives request
@@ -149,9 +156,13 @@ curl http://localhost:8002/health  # Case Management
 curl http://localhost:8003/health  # Task Management
 curl http://localhost:8004/health  # AI Agent Service
 curl http://localhost:8005/health  # Persistence Service
+curl http://localhost:8006/health  # Dashboard Service
 ```
 
-### 4. Test the System
+### 4. View Pending Tasks
+Open http://localhost:8006 in your browser to see the dashboard listing all pending tasks.
+
+### 5. Test the System
 ```bash
 # Create tasks via Channel Service API
 curl -X POST http://localhost:8001/api/v1/message \
@@ -263,6 +274,7 @@ curl -X POST http://localhost:8001/api/v1/message \
 - **Task Management**: `localhost:8003`
 - **AI Agent Service**: `localhost:8004`
 - **Persistence Service**: `localhost:8005`
+- **Dashboard Service**: `localhost:8006`
 - **PostgreSQL Database**: `localhost:5432`
 
 ### Docker Commands
@@ -519,7 +531,11 @@ SELECT id, case_id, message, sender FROM conversation_entries;
     │   ├── src/main.rs
     │   ├── Cargo.toml
     │   └── Dockerfile
-    └── persistence-service/      # Database layer
+    ├── persistence-service/      # Database layer
+    │   ├── src/main.rs
+    │   ├── Cargo.toml
+    │   └── Dockerfile
+    └── dashboard-service/        # HTML dashboard for pending tasks
         ├── src/main.rs
         ├── Cargo.toml
         └── Dockerfile
@@ -552,7 +568,7 @@ curl -X POST http://localhost:8001/bot \
   -d '{"message": "Test task creation"}'
 
 # Check health endpoints
-for port in 8001 8002 8003 8004 8005; do
+for port in 8001 8002 8003 8004 8005 8006; do
   echo "Testing port $port:"
   curl -s http://localhost:$port/health || echo "Service on port $port not responding"
 done

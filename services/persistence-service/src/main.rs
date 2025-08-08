@@ -1,17 +1,15 @@
 use axum::{
-    extract::{Path, State},
+    extract::{Path, State, Query},
     http::StatusCode,
     response::Json,
     routing::{get, post, put, delete},
     Router,
 };
-use common::{config::ServiceConfig, HealthResponse, ServiceResult, ServiceError};
+use common::{config::ServiceConfig, HealthResponse, ServiceResult};
 use models::{
-    Case, Task, ConversationEntry, CaseWorkflow, CreateCaseRequest, UpdateCaseRequest,
-    CreateTaskRequest, UpdateTaskRequest, CaseStatus, TaskStatus, Priority, TaskType,
-    MessageSender, StepStatus
+    Case, Task, ConversationEntry, CaseWorkflow,
+    UpdateCaseRequest, UpdateTaskRequest, TaskStatus,
 };
-use sqlx::{PgPool, Row};
 use std::sync::Arc;
 use tower::ServiceBuilder;
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
@@ -25,6 +23,11 @@ use database_working::Database;
 struct AppState {
     config: ServiceConfig,
     db: Database,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct TaskQuery {
+    status: Option<TaskStatus>,
 }
 
 #[tokio::main]
@@ -63,6 +66,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/cases/:id/workflow", put(update_case_workflow))
         // Task routes
         .route("/api/v1/tasks", post(create_task))
+        .route("/api/v1/tasks", get(get_tasks))
         .route("/api/v1/tasks/:id", get(get_task))
         .route("/api/v1/tasks/:id", put(update_task))
         .route("/api/v1/tasks/:id", delete(delete_task))
@@ -169,6 +173,21 @@ async fn create_task(
     info!("Creating task: {}", task.id);
     let created_task = state.db.create_task(task).await?;
     Ok(Json(created_task))
+}
+
+#[instrument(skip(state))]
+async fn get_tasks(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<TaskQuery>,
+) -> ServiceResult<Json<Vec<Task>>> {
+    info!("Getting tasks with query: {:?}", query.status);
+
+    let tasks = match query.status {
+        Some(status) => state.db.get_tasks_by_status(status).await?,
+        None => state.db.get_all_tasks().await?,
+    };
+
+    Ok(Json(tasks))
 }
 
 #[instrument(skip(state))]
