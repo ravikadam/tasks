@@ -9,6 +9,7 @@ use common::{config::ServiceConfig, HealthResponse, ServiceResult};
 use models::{
     Case, Task, ConversationEntry, CaseWorkflow,
     UpdateCaseRequest, UpdateTaskRequest, TaskStatus,
+    RegisterRequest, LoginRequest, LoginResponse, UserProfile,
 };
 use std::sync::Arc;
 use tower::ServiceBuilder;
@@ -56,6 +57,10 @@ async fn main() -> anyhow::Result<()> {
 
     let app = Router::new()
         .route("/health", get(health_check))
+        // Authentication routes
+        .route("/api/v1/auth/register", post(register_user))
+        .route("/api/v1/auth/login", post(login_user))
+        .route("/api/v1/auth/validate", post(validate_session))
         // Case routes
         .route("/api/v1/cases", post(create_case))
         .route("/api/v1/cases/:id", get(get_case))
@@ -90,6 +95,87 @@ async fn health_check() -> Json<HealthResponse> {
     Json(HealthResponse::new("persistence-service"))
 }
 
+// Authentication endpoints
+#[instrument(skip(state))]
+async fn register_user(
+    State(state): State<Arc<AppState>>,
+    Json(request): Json<RegisterRequest>,
+) -> ServiceResult<Json<UserProfile>> {
+    info!("Registering user: {}", request.email);
+    let user = state.db.create_user(request).await?;
+    
+    let profile = UserProfile {
+        id: user.id,
+        email: user.email,
+        full_name: user.full_name,
+        organization: user.organization,
+        is_active: user.is_active,
+        created_at: user.created_at,
+        last_login: user.last_login,
+    };
+    
+    Ok(Json(profile))
+}
+
+#[instrument(skip(state))]
+async fn login_user(
+    State(state): State<Arc<AppState>>,
+    Json(request): Json<LoginRequest>,
+) -> ServiceResult<Json<LoginResponse>> {
+    info!("User login attempt: {}", request.email);
+    let user = state.db.authenticate_user(request).await?;
+    
+    // Generate session token
+    let session_token = uuid::Uuid::new_v4().to_string();
+    let expires_at = chrono::Utc::now() + chrono::Duration::hours(24);
+    
+    let _session = state.db.create_session(user.id, session_token.clone(), expires_at).await?;
+    
+    let profile = UserProfile {
+        id: user.id,
+        email: user.email,
+        full_name: user.full_name,
+        organization: user.organization,
+        is_active: user.is_active,
+        created_at: user.created_at,
+        last_login: user.last_login,
+    };
+    
+    let response = LoginResponse {
+        user: profile,
+        session_token,
+        expires_at,
+    };
+    
+    Ok(Json(response))
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct ValidateSessionRequest {
+    session_token: String,
+}
+
+#[instrument(skip(state))]
+async fn validate_session(
+    State(state): State<Arc<AppState>>,
+    Json(request): Json<ValidateSessionRequest>,
+) -> ServiceResult<Json<UserProfile>> {
+    info!("Validating session");
+    let user = state.db.validate_session(&request.session_token).await?;
+    
+    let profile = UserProfile {
+        id: user.id,
+        email: user.email,
+        full_name: user.full_name,
+        organization: user.organization,
+        is_active: user.is_active,
+        created_at: user.created_at,
+        last_login: user.last_login,
+    };
+    
+    Ok(Json(profile))
+}
+
 // Case endpoints
 #[instrument(skip(state))]
 async fn create_case(
@@ -105,9 +191,12 @@ async fn create_case(
 async fn get_case(
     State(state): State<Arc<AppState>>,
     Path(id): Path<Uuid>,
+    // TODO: Extract user_id from session token in header
 ) -> ServiceResult<Json<Case>> {
     info!("Getting case: {}", id);
-    let case = state.db.get_case(id).await?;
+    // TODO: For now using a placeholder user_id - this needs to be extracted from session
+    let placeholder_user_id = Uuid::new_v4();
+    let case = state.db.get_case(id, placeholder_user_id).await?;
     Ok(Json(case))
 }
 
@@ -118,7 +207,9 @@ async fn update_case(
     Json(request): Json<UpdateCaseRequest>,
 ) -> ServiceResult<Json<Case>> {
     info!("Updating case: {}", id);
-    let updated_case = state.db.update_case(id, request).await?;
+    // TODO: Extract user_id from session token - using placeholder for now
+    let placeholder_user_id = Uuid::new_v4();
+    let updated_case = state.db.update_case(id, placeholder_user_id, request).await?;
     Ok(Json(updated_case))
 }
 

@@ -73,14 +73,18 @@ async fn create_case(
 ) -> ServiceResult<Json<Case>> {
     info!("Creating new case: {:?}", request);
 
+    let case_id = Uuid::new_v4();
+    let now = Utc::now();
+
     let case = Case {
-        id: Uuid::new_v4(),
+        id: case_id,
+        user_id: Uuid::new_v4(), // TODO: Extract from session token
         title: request.title,
         description: request.description,
         status: CaseStatus::Open,
         priority: request.priority,
-        created_at: Utc::now(),
-        updated_at: Utc::now(),
+        created_at: now,
+        updated_at: now,
         assigned_to: request.assigned_to,
         metadata: serde_json::json!({}),
     };

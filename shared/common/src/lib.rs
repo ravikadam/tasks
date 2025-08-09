@@ -27,6 +27,9 @@ pub enum ServiceError {
     #[error("Bad request: {0}")]
     BadRequest(String),
     
+    #[error("Unauthorized: {0}")]
+    Unauthorized(String),
+    
     #[error("Internal error: {0}")]
     Internal(#[from] anyhow::Error),
 }
@@ -51,6 +54,9 @@ impl IntoResponse for ServiceError {
             }
             ServiceError::BadRequest(ref message) => {
                 (StatusCode::BAD_REQUEST, message.as_str())
+            }
+            ServiceError::Unauthorized(ref message) => {
+                (StatusCode::UNAUTHORIZED, message.as_str())
             }
             ServiceError::Internal(ref e) => {
                 tracing::error!("Internal error: {:?}", e);

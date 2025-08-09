@@ -17,6 +17,7 @@ anyhow = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
 sqlx = { workspace = true }
+bcrypt = "0.15"
 
 models = { path = "../../shared/models" }
 common = { path = "../../shared/common" }

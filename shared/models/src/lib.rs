@@ -7,9 +7,69 @@ pub use chrono;
 pub use serde;
 pub use uuid;
 
+// User Management Models
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct User {
+    pub id: Uuid,
+    pub email: String,
+    pub password_hash: String,
+    pub full_name: String,
+    pub organization: Option<String>,
+    pub is_active: bool,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub last_login: Option<DateTime<Utc>>,
+    pub metadata: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EmailAccount {
+    pub id: Uuid,
+    pub user_id: Uuid,
+    pub email_address: String,
+    pub provider: EmailProvider,
+    pub is_active: bool,
+    pub oauth_token: Option<String>,
+    pub oauth_refresh_token: Option<String>,
+    pub oauth_expires_at: Option<DateTime<Utc>>,
+    pub imap_settings: Option<ImapSettings>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub metadata: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum EmailProvider {
+    Office365,
+    Gmail,
+    Yahoo,
+    Custom,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImapSettings {
+    pub server: String,
+    pub port: u16,
+    pub use_tls: bool,
+    pub username: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UserSession {
+    pub id: Uuid,
+    pub user_id: Uuid,
+    pub session_token: String,
+    pub expires_at: DateTime<Utc>,
+    pub created_at: DateTime<Utc>,
+    pub last_accessed: DateTime<Utc>,
+    pub ip_address: Option<String>,
+    pub user_agent: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Case {
     pub id: Uuid,
+    pub user_id: Uuid,
     pub title: String,
     pub description: Option<String>,
     pub status: CaseStatus,
@@ -40,6 +100,7 @@ pub enum Priority {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Task {
     pub id: Uuid,
+    pub user_id: Uuid,
     pub case_id: Uuid,
     pub title: String,
     pub description: Option<String>,
@@ -76,6 +137,7 @@ pub enum TaskStatus {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConversationEntry {
     pub id: Uuid,
+    pub user_id: Uuid,
     pub case_id: Uuid,
     pub message: String,
     pub sender: MessageSender,
@@ -149,6 +211,60 @@ pub struct CreateCaseRequest {
     pub description: Option<String>,
     pub priority: Priority,
     pub assigned_to: Option<String>,
+}
+
+// User Management Request/Response Models
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RegisterRequest {
+    pub email: String,
+    pub password: String,
+    pub full_name: String,
+    pub organization: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct LoginRequest {
+    pub email: String,
+    pub password: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct LoginResponse {
+    pub user: UserProfile,
+    pub session_token: String,
+    pub expires_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct UserProfile {
+    pub id: Uuid,
+    pub email: String,
+    pub full_name: String,
+    pub organization: Option<String>,
+    pub is_active: bool,
+    pub created_at: DateTime<Utc>,
+    pub last_login: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AddEmailAccountRequest {
+    pub email_address: String,
+    pub provider: EmailProvider,
+    pub oauth_token: Option<String>,
+    pub oauth_refresh_token: Option<String>,
+    pub imap_settings: Option<ImapSettings>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct UpdateUserRequest {
+    pub full_name: Option<String>,
+    pub organization: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ChangePasswordRequest {
+    pub current_password: String,
+    pub new_password: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

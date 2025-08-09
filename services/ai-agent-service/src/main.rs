@@ -4,17 +4,17 @@ use axum::{
     routing::{get, post},
     Router,
 };
+use chrono::Utc;
 use common::{config::ServiceConfig, http_client::HttpClient, HealthResponse, ServiceResult};
 use models::{
-    MessageRequest, MessageResponse, MessageChannel, MessageSender, ConversationEntry,
-    CreateCaseRequest, CreateTaskRequest, TaskType, Priority, Case, Task
+    ConversationEntry, MessageRequest, MessageResponse, MessageSender, 
+    CreateTaskRequest, CreateCaseRequest, Priority, Case, Task
 };
 use std::sync::Arc;
 use tower::ServiceBuilder;
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
-use tracing::{info, instrument, error};
+use tracing::{info, instrument};
 use uuid::Uuid;
-use regex::Regex;
 
 mod llm_client;
 use llm_client::LLMClient;
@@ -88,10 +88,11 @@ async fn process_message(
     // Step 2: Add conversation entry
     let conversation_entry = ConversationEntry {
         id: Uuid::new_v4(),
+        user_id: Uuid::new_v4(), // TODO: Extract from session token
         case_id,
         message: request.message.clone(),
         sender: MessageSender::User,
-        timestamp: chrono::Utc::now(),
+        timestamp: Utc::now(),
         metadata: serde_json::json!({
             "channel": request.channel,
             "sender_id": request.sender_id
@@ -133,14 +134,12 @@ async fn process_message(
     // Step 5: Add AI response to conversation
     let ai_conversation_entry = ConversationEntry {
         id: Uuid::new_v4(),
+        user_id: Uuid::new_v4(), // TODO: Extract from session token
         case_id,
         message: ai_response.response.clone(),
         sender: MessageSender::Agent,
-        timestamp: chrono::Utc::now(),
-        metadata: serde_json::json!({
-            "tasks_created": tasks_created.len(),
-            "actions_taken": actions_taken.len()
-        }),
+        timestamp: Utc::now(),
+        metadata: serde_json::json!({}),
     };
 
     state.http_client

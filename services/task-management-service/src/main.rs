@@ -95,8 +95,11 @@ async fn create_task(
 ) -> ServiceResult<Json<Task>> {
     info!("Creating task for case {}: {:?}", case_id, request);
 
+    let now = Utc::now();
+    let task_id = Uuid::new_v4();
     let task = Task {
-        id: Uuid::new_v4(),
+        id: task_id,
+        user_id: Uuid::new_v4(), // TODO: Extract from session token
         case_id,
         title: request.title,
         description: request.description,
@@ -104,8 +107,8 @@ async fn create_task(
         status: TaskStatus::Pending,
         priority: request.priority,
         due_date: request.due_date,
-        created_at: Utc::now(),
-        updated_at: Utc::now(),
+        created_at: now,
+        updated_at: now,
         completed_at: None,
         metadata: serde_json::json!({}),
     };

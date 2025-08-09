@@ -1,11 +1,15 @@
 use sqlx::{PgPool, Row};
 use models::{
     Case, Task, ConversationEntry, CaseWorkflow, WorkflowStep,
-    UpdateCaseRequest, UpdateTaskRequest, StepStatus, TaskStatus
+    UpdateCaseRequest, UpdateTaskRequest, StepStatus, TaskStatus,
+    User, EmailAccount, UserSession, RegisterRequest, LoginRequest,
+    LoginResponse, UserProfile, AddEmailAccountRequest, UpdateUserRequest,
+    ChangePasswordRequest, EmailProvider, ImapSettings
 };
 use common::{ServiceResult, ServiceError};
 use uuid::Uuid;
 use chrono::Utc;
+use bcrypt::{hash, verify, DEFAULT_COST};
 
 #[derive(Clone)]
 pub struct Database {
@@ -21,10 +25,65 @@ impl Database {
     pub async fn migrate(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // Run migrations manually, executing each statement separately
         
-        // Create cases table
+        // Create users table
+        sqlx::query(r#"
+            CREATE TABLE IF NOT EXISTS users (
+                id UUID PRIMARY KEY,
+                email VARCHAR UNIQUE NOT NULL,
+                password_hash VARCHAR NOT NULL,
+                full_name VARCHAR NOT NULL,
+                organization VARCHAR,
+                is_active BOOLEAN NOT NULL DEFAULT true,
+                created_at TIMESTAMPTZ NOT NULL,
+                updated_at TIMESTAMPTZ NOT NULL,
+                last_login TIMESTAMPTZ,
+                metadata JSONB NOT NULL DEFAULT '{}'
+            )
+        "#)
+        .execute(&self.pool)
+        .await?;
+
+        // Create user_sessions table
+        sqlx::query(r#"
+            CREATE TABLE IF NOT EXISTS user_sessions (
+                id UUID PRIMARY KEY,
+                user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                session_token VARCHAR UNIQUE NOT NULL,
+                expires_at TIMESTAMPTZ NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL,
+                last_accessed TIMESTAMPTZ NOT NULL,
+                ip_address VARCHAR,
+                user_agent TEXT
+            )
+        "#)
+        .execute(&self.pool)
+        .await?;
+
+        // Create email_accounts table
+        sqlx::query(r#"
+            CREATE TABLE IF NOT EXISTS email_accounts (
+                id UUID PRIMARY KEY,
+                user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                email_address VARCHAR NOT NULL,
+                provider VARCHAR NOT NULL,
+                is_active BOOLEAN NOT NULL DEFAULT true,
+                oauth_token TEXT,
+                oauth_refresh_token TEXT,
+                oauth_expires_at TIMESTAMPTZ,
+                imap_settings JSONB,
+                created_at TIMESTAMPTZ NOT NULL,
+                updated_at TIMESTAMPTZ NOT NULL,
+                metadata JSONB NOT NULL DEFAULT '{}'
+            )
+        "#)
+        .execute(&self.pool)
+        .await?;
+
+        // Create cases table (updated with user_id)
         sqlx::query(r#"
             CREATE TABLE IF NOT EXISTS cases (
                 id UUID PRIMARY KEY,
+                user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                 title VARCHAR NOT NULL,
                 description TEXT,
                 status VARCHAR NOT NULL,
@@ -38,10 +97,11 @@ impl Database {
         .execute(&self.pool)
         .await?;
 
-        // Create tasks table
+        // Create tasks table (updated with user_id)
         sqlx::query(r#"
             CREATE TABLE IF NOT EXISTS tasks (
                 id UUID PRIMARY KEY,
+                user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                 case_id UUID NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
                 title VARCHAR NOT NULL,
                 description TEXT,
@@ -58,10 +118,11 @@ impl Database {
         .execute(&self.pool)
         .await?;
 
-        // Create conversation entries table
+        // Create conversation entries table (updated with user_id)
         sqlx::query(r#"
             CREATE TABLE IF NOT EXISTS conversation_entries (
                 id UUID PRIMARY KEY,
+                user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                 case_id UUID NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
                 message TEXT NOT NULL,
                 sender VARCHAR NOT NULL,
@@ -72,18 +133,225 @@ impl Database {
         .execute(&self.pool)
         .await?;
 
+        // Add user_id columns to existing tables if they don't exist
+        // This handles the case where tables were created before the multi-user migration
+        
+        // Add user_id to cases table if it doesn't exist
+        sqlx::query(r#"
+            DO $$ 
+            BEGIN 
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                              WHERE table_name='cases' AND column_name='user_id') THEN
+                    ALTER TABLE cases ADD COLUMN user_id UUID REFERENCES users(id) ON DELETE CASCADE;
+                END IF;
+            END $$;
+        "#)
+        .execute(&self.pool)
+        .await?;
+
+        // Add user_id to tasks table if it doesn't exist
+        sqlx::query(r#"
+            DO $$ 
+            BEGIN 
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                              WHERE table_name='tasks' AND column_name='user_id') THEN
+                    ALTER TABLE tasks ADD COLUMN user_id UUID REFERENCES users(id) ON DELETE CASCADE;
+                END IF;
+            END $$;
+        "#)
+        .execute(&self.pool)
+        .await?;
+
+        // Add user_id to conversation_entries table if it doesn't exist
+        sqlx::query(r#"
+            DO $$ 
+            BEGIN 
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                              WHERE table_name='conversation_entries' AND column_name='user_id') THEN
+                    ALTER TABLE conversation_entries ADD COLUMN user_id UUID REFERENCES users(id) ON DELETE CASCADE;
+                END IF;
+            END $$;
+        "#)
+        .execute(&self.pool)
+        .await?;
+
         Ok(())
+    }
+
+    // User Management Operations
+    pub async fn create_user(&self, request: RegisterRequest) -> ServiceResult<User> {
+        let user_id = Uuid::new_v4();
+        let now = Utc::now();
+        let password_hash = hash(&request.password, DEFAULT_COST)
+            .map_err(|e| ServiceError::Internal(anyhow::anyhow!("Password hashing error: {}", e)))?;
+
+        let user = User {
+            id: user_id,
+            email: request.email.clone(),
+            password_hash: password_hash.clone(),
+            full_name: request.full_name.clone(),
+            organization: request.organization.clone(),
+            is_active: true,
+            created_at: now,
+            updated_at: now,
+            last_login: None,
+            metadata: serde_json::json!({}),
+        };
+
+        sqlx::query(
+            r#"
+            INSERT INTO users (id, email, password_hash, full_name, organization, is_active, created_at, updated_at, last_login, metadata)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            "#
+        )
+        .bind(user.id)
+        .bind(&user.email)
+        .bind(&user.password_hash)
+        .bind(&user.full_name)
+        .bind(&user.organization)
+        .bind(user.is_active)
+        .bind(user.created_at)
+        .bind(user.updated_at)
+        .bind(user.last_login)
+        .bind(&user.metadata)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| ServiceError::Internal(anyhow::anyhow!("Database error: {}", e)))?;
+
+        Ok(user)
+    }
+
+    pub async fn authenticate_user(&self, request: LoginRequest) -> ServiceResult<User> {
+        let row = sqlx::query(
+            "SELECT id, email, password_hash, full_name, organization, is_active, created_at, updated_at, last_login, metadata FROM users WHERE email = $1 AND is_active = true"
+        )
+        .bind(&request.email)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| ServiceError::Internal(anyhow::anyhow!("Database error: {}", e)))?;
+
+        let row = row.ok_or_else(|| ServiceError::NotFound("User not found or inactive".to_string()))?;
+
+        let password_hash: String = row.get("password_hash");
+        if !verify(&request.password, &password_hash)
+            .map_err(|e| ServiceError::Internal(anyhow::anyhow!("Password verification error: {}", e)))? {
+            return Err(ServiceError::Unauthorized("Invalid credentials".to_string()));
+        }
+
+        let mut user = User {
+            id: row.get("id"),
+            email: row.get("email"),
+            password_hash,
+            full_name: row.get("full_name"),
+            organization: row.get("organization"),
+            is_active: row.get("is_active"),
+            created_at: row.get("created_at"),
+            updated_at: row.get("updated_at"),
+            last_login: row.get("last_login"),
+            metadata: row.get("metadata"),
+        };
+
+        // Update last login
+        let now = Utc::now();
+        sqlx::query("UPDATE users SET last_login = $1, updated_at = $2 WHERE id = $3")
+            .bind(now)
+            .bind(now)
+            .bind(user.id)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| ServiceError::Internal(anyhow::anyhow!("Database error: {}", e)))?;
+
+        user.last_login = Some(now);
+        user.updated_at = now;
+        Ok(user)
+    }
+
+    pub async fn create_session(&self, user_id: Uuid, session_token: String, expires_at: chrono::DateTime<Utc>) -> ServiceResult<UserSession> {
+        let session_id = Uuid::new_v4();
+        let now = Utc::now();
+
+        let session = UserSession {
+            id: session_id,
+            user_id,
+            session_token: session_token.clone(),
+            expires_at,
+            created_at: now,
+            last_accessed: now,
+            ip_address: None,
+            user_agent: None,
+        };
+
+        sqlx::query(
+            r#"
+            INSERT INTO user_sessions (id, user_id, session_token, expires_at, created_at, last_accessed, ip_address, user_agent)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            "#
+        )
+        .bind(session.id)
+        .bind(session.user_id)
+        .bind(&session.session_token)
+        .bind(session.expires_at)
+        .bind(session.created_at)
+        .bind(session.last_accessed)
+        .bind(&session.ip_address)
+        .bind(&session.user_agent)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| ServiceError::Internal(anyhow::anyhow!("Database error: {}", e)))?;
+
+        Ok(session)
+    }
+
+    pub async fn validate_session(&self, session_token: &str) -> ServiceResult<User> {
+        let row = sqlx::query(
+            r#"
+            SELECT u.id, u.email, u.password_hash, u.full_name, u.organization, u.is_active, 
+                   u.created_at, u.updated_at, u.last_login, u.metadata
+            FROM users u
+            JOIN user_sessions s ON u.id = s.user_id
+            WHERE s.session_token = $1 AND s.expires_at > NOW() AND u.is_active = true
+            "#
+        )
+        .bind(session_token)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| ServiceError::Internal(anyhow::anyhow!("Database error: {}", e)))?;
+
+        let row = row.ok_or_else(|| ServiceError::Unauthorized("Invalid or expired session".to_string()))?;
+
+        // Update last accessed time
+        let now = Utc::now();
+        sqlx::query("UPDATE user_sessions SET last_accessed = $1 WHERE session_token = $2")
+            .bind(now)
+            .bind(session_token)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| ServiceError::Internal(anyhow::anyhow!("Database error: {}", e)))?;
+
+        Ok(User {
+            id: row.get("id"),
+            email: row.get("email"),
+            password_hash: row.get("password_hash"),
+            full_name: row.get("full_name"),
+            organization: row.get("organization"),
+            is_active: row.get("is_active"),
+            created_at: row.get("created_at"),
+            updated_at: row.get("updated_at"),
+            last_login: row.get("last_login"),
+            metadata: row.get("metadata"),
+        })
     }
 
     // Case operations
     pub async fn create_case(&self, case: Case) -> ServiceResult<Case> {
         sqlx::query(
             r#"
-            INSERT INTO cases (id, title, description, status, priority, created_at, updated_at, assigned_to, metadata)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            INSERT INTO cases (id, user_id, title, description, status, priority, created_at, updated_at, assigned_to, metadata)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             "#
         )
         .bind(case.id)
+        .bind(case.user_id)
         .bind(&case.title)
         .bind(&case.description)
         .bind(serde_json::to_string(&case.status).map_err(|e| ServiceError::Internal(anyhow::anyhow!("Serialization error: {}", e)))?)
@@ -99,11 +367,12 @@ impl Database {
         Ok(case)
     }
 
-    pub async fn get_case(&self, id: Uuid) -> ServiceResult<Case> {
+    pub async fn get_case(&self, id: Uuid, user_id: Uuid) -> ServiceResult<Case> {
         let row = sqlx::query(
-            "SELECT id, title, description, status, priority, created_at, updated_at, assigned_to, metadata FROM cases WHERE id = $1"
+            "SELECT id, user_id, title, description, status, priority, created_at, updated_at, assigned_to, metadata FROM cases WHERE id = $1 AND user_id = $2"
         )
         .bind(id)
+        .bind(user_id)
         .fetch_optional(&self.pool)
         .await
         .map_err(|e| ServiceError::Internal(anyhow::anyhow!("Database error: {}", e)))?
@@ -111,6 +380,7 @@ impl Database {
 
         Ok(Case {
             id: row.get("id"),
+            user_id: row.get("user_id"),
             title: row.get("title"),
             description: row.get("description"),
             status: serde_json::from_str(&row.get::<String, _>("status")).map_err(|e| ServiceError::Internal(anyhow::anyhow!("Deserialization error: {}", e)))?,
@@ -122,9 +392,9 @@ impl Database {
         })
     }
 
-    pub async fn update_case(&self, id: Uuid, request: UpdateCaseRequest) -> ServiceResult<Case> {
+    pub async fn update_case(&self, id: Uuid, user_id: Uuid, request: UpdateCaseRequest) -> ServiceResult<Case> {
         // Get current case first
-        let mut case = self.get_case(id).await?;
+        let mut case = self.get_case(id, user_id).await?;
         
         // Update fields
         if let Some(title) = request.title {
@@ -203,6 +473,7 @@ impl Database {
 
         Ok(Task {
             id: row.get("id"),
+            user_id: row.get("user_id"),
             case_id: row.get("case_id"),
             title: row.get("title"),
             description: row.get("description"),
@@ -287,6 +558,7 @@ impl Database {
         for row in rows {
             tasks.push(Task {
                 id: row.get("id"),
+                user_id: row.get("user_id"),
                 case_id: row.get("case_id"),
                 title: row.get("title"),
                 description: row.get("description"),
@@ -314,6 +586,7 @@ impl Database {
         for row in rows {
             tasks.push(Task {
                 id: row.get("id"),
+                user_id: row.get("user_id"),
                 case_id: row.get("case_id"),
                 title: row.get("title"),
                 description: row.get("description"),
@@ -347,6 +620,7 @@ impl Database {
         for row in rows {
             tasks.push(Task {
                 id: row.get("id"),
+                user_id: row.get("user_id"),
                 case_id: row.get("case_id"),
                 title: row.get("title"),
                 description: row.get("description"),
@@ -379,6 +653,7 @@ impl Database {
         for row in rows {
             entries.push(ConversationEntry {
                 id: row.get("id"),
+                user_id: row.get("user_id"),
                 case_id: row.get("case_id"),
                 message: row.get("message"),
                 sender: serde_json::from_str(&row.get::<String, _>("sender")).map_err(|e| ServiceError::Internal(anyhow::anyhow!("Deserialization error: {}", e)))?,

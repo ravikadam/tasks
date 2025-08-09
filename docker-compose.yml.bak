@@ -1,0 +1,97 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: task_agent
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  channel-service:
+    build:
+      context: .
+      dockerfile: services/channel-service/Dockerfile
+    ports:
+      - "8001:8001"
+    environment:
+      - RUST_LOG=info
+      - PORT=8001
+      - CASE_MANAGEMENT_SERVICE_URL=http://case-management-service:8002
+      - AI_AGENT_SERVICE_URL=http://ai-agent-service:8004
+    depends_on:
+      - postgres
+
+  case-management-service:
+    build:
+      context: .
+      dockerfile: services/case-management-service/Dockerfile
+    ports:
+      - "8002:8002"
+    environment:
+      - RUST_LOG=info
+      - PORT=8002
+      - PERSISTENCE_SERVICE_URL=http://persistence-service:8005
+    depends_on:
+      - postgres
+
+  task-management-service:
+    build:
+      context: .
+      dockerfile: services/task-management-service/Dockerfile
+    ports:
+      - "8003:8003"
+    environment:
+      - RUST_LOG=info
+      - PORT=8003
+      - PERSISTENCE_SERVICE_URL=http://persistence-service:8005
+    depends_on:
+      - postgres
+
+  ai-agent-service:
+    build:
+      context: .
+      dockerfile: services/ai-agent-service/Dockerfile
+    ports:
+      - "8004:8004"
+    environment:
+      - RUST_LOG=info
+      - PORT=8004
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - CASE_MANAGEMENT_SERVICE_URL=http://case-management-service:8002
+      - TASK_MANAGEMENT_SERVICE_URL=http://task-management-service:8003
+    depends_on:
+      - postgres
+
+  persistence-service:
+    build:
+      context: .
+      dockerfile: services/persistence-service/Dockerfile
+    ports:
+      - "8005:8005"
+    environment:
+      - RUST_LOG=info
+      - PORT=8005
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/task_agent
+    depends_on:
+      - postgres
+
+  dashboard-service:
+    build:
+      context: .
+      dockerfile: services/dashboard-service/Dockerfile
+    ports:
+      - "8006:8006"
+    environment:
+      - RUST_LOG=info
+      - PORT=8006
+      - TASK_MANAGEMENT_SERVICE_URL=http://task-management-service:8003
+    depends_on:
+      - task-management-service
+
+volumes:
+  postgres_data:

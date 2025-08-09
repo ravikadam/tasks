@@ -1,6 +1,15 @@
-# Agentic Task Capture System (Rust) - Microservices Architecture
+# Multi-User Agentic Task Management System (Rust) - Microservices Architecture
 
-A distributed, microservices-based agentic system that captures tasks from natural language input using LLM-based extraction. Built with Docker, PostgreSQL, and service-to-service HTTP communication for scalability and maintainability.
+A distributed, microservices-based **multi-user** agentic system that captures tasks from natural language input using LLM-based extraction. Built with Docker, PostgreSQL, user authentication, and service-to-service HTTP communication for scalability and maintainability.
+
+## 🎯 **Multi-User Features**
+
+- **🔐 User Authentication**: Secure registration and login with bcrypt password hashing
+- **👥 Multi-Tenant Architecture**: Complete user data isolation and user-specific operations
+- **🍪 Session Management**: HTTP-only cookies with 24-hour expiration
+- **🎨 Modern UI**: Tailwind CSS responsive interface with login/registration pages
+- **⚙️ User Configuration**: Account management and email connection interface
+- **🔒 Data Security**: All tasks, cases, and conversations are user-specific with foreign key constraints
 
 ## 🏗️ Microservices Architecture
 
@@ -44,34 +53,39 @@ graph TB
     class Channel,Case,Task,AI,Persist service
     class DB database
     class OpenAI external
-    class User user
 ```
 
 ## 🔧 Services Overview
 
-### **1. Channel Service** (Port 8001)
-- **Purpose**: Entry point for all user interactions
-- **Endpoints**: `/api/v1/message`, `/health`
-- **Responsibilities**: 
-  - Receive input from various channels (Bot, Email, WebChat, API)
-  - Route requests to AI Agent and Case Management services
-  - Handle message validation and formatting
+### 1. **Channel Service** (Port 8001)
+- **Purpose**: Entry point for all external communications
+- **Features**: Handles messages from bots, emails, web chat, and API calls
+- **Multi-User**: Routes user-specific messages to AI Agent Service for processing
 
-### **2. Case Management Service** (Port 8002)
-- **Purpose**: Manages case lifecycle and conversation history
-- **Endpoints**: `/cases`, `/cases/{id}`, `/cases/{id}/conversations`, `/health`
-- **Responsibilities**:
-  - Create and manage cases (conversation sessions)
-  - Track conversation history and context
-  - Manage case workflow and state transitions
+### 2. **AI Agent Service** (Port 8004)
+- **Purpose**: LLM-powered intelligent task extraction and processing
+- **Features**: Uses OpenAI GPT-3.5-turbo to analyze natural language and extract actionable tasks
+- **Multi-User**: Creates user-specific cases and tasks with proper user isolation
 
-### **3. Task Management Service** (Port 8003)
-- **Purpose**: CRUD operations for individual tasks
-- **Endpoints**: `/tasks`, `/tasks/{id}`, `/tasks/search`, `/health`
-- **Responsibilities**:
-  - Create, read, update, delete tasks
-  - Task validation and business logic
-  - Task search and filtering
+### 3. **Case Management Service** (Port 8002)
+- **Purpose**: Manages case workflows and conversation history
+- **Features**: CRUD operations for cases, status tracking, conversation entries
+- **Multi-User**: All cases are linked to specific users via `user_id` foreign keys
+
+### 4. **Task Management Service** (Port 8003)
+- **Purpose**: Handles task lifecycle and operations
+- **Features**: CRUD operations for tasks, status updates, priority management
+- **Multi-User**: All tasks are user-specific and isolated per user account
+
+### 5. **Persistence Service** (Port 8005)
+- **Purpose**: Database abstraction layer with authentication
+- **Features**: PostgreSQL operations, user management, session handling, bcrypt password hashing
+- **Multi-User**: Manages user accounts, sessions, and enforces data isolation
+
+### 6. **Dashboard Service** (Port 8006)
+- **Purpose**: Multi-user web interface with authentication
+- **Features**: User login/registration, session management, user-specific task display, account configuration
+- **Multi-User**: Complete authentication flow with secure session cookies and user-specific data views and filtering
 
 ### **4. AI Agent Service** (Port 8004)
 - **Purpose**: LLM integration and task extraction
